@@ -1,6 +1,8 @@
 # Binary Watch
 
-This is a project of binary watch which is able to show time, date and its battery level. It is based on an ATMega328p and a PCF8563 real-time clock. The clock has one press bottom and implemented light sensing for brightness adjustments.
+This is a project of binary watch which is able to show time, date and its battery level. Three side LEDs show what is currently on display. The watch is based on an ATMega328p and a PCF8563 real-time clock. All control is done using one press bottom. Light-sensing is implemented for brightness adjustments. 
+
+![Final look](https://github.com/hadato/Binary_Watch/blob/master/Top_final.PNG)
 
 ## Description
 
