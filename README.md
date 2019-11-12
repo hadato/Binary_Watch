@@ -43,3 +43,7 @@ The board is designe using EAGLE and its lates version (9.5.1). The file Top_fin
 - Improve the coding and commenting
 - Making a more versatile design which can be used in different watches ranging from tiny hand watches to table/wall watches.
 - Implement USB communication with PC to be able to conveniently set up time on the watch (different uC needed).
+
+## Other Pictures
+![TopCopper](https://github.com/hadato/Binary_Watch/blob/master/Top_copper.PNG)
+![BotCopper](https://github.com/hadato/Binary_Watch/blob/master/Bot_Copper.PNG)
