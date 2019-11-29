@@ -19,7 +19,7 @@ The repository contains a first prototype of the watch to be implemented in a wo
 - Small tactile switch
 - MCP73831T Li-Ion battery charger
 - Rechargeable 2032 Li-Ion battery
-- Photoresistor for LED intensity adjustment
+- Phototransistor for LED intensity adjustment
 - USB connector for charging
 
 ### Working Principle
