@@ -67,12 +67,15 @@ namespace watch
 	extern State state;
 	extern float battery_level;
 	extern float u_supply;
+	extern uint16_t u_supply_sum;
 	extern float u_supply_show;
 	extern uint16_t blink_counter;		//A counter for blinking function
 	extern bool blink;					//Should the LEDs blink?
 	extern uint8_t error;
 	extern uint8_t light;
+	extern uint16_t light_sum;
 	extern adc_stat ACD_stat;
+	extern uint8_t adc_counter;
 	
 	//TWI communication
 	extern twi Twi;
@@ -82,6 +85,7 @@ namespace watch
 	uint8_t multiplex(uint8_t);
 	void clear_LED();
 	void set_LED(uint8_t row, uint8_t column);	
+	void set_all_pins_low_LED();
 	void show(uint8_t, Time, State);
 	void ISR_handler();	
 	void write_port(volatile uint8_t *, uint8_t, uint8_t);
@@ -122,5 +126,10 @@ namespace watch
 	void ADC_start();
 	int  ADC_get_light();
 	int  ADC_get_supply_light();	
+	
+	//Power management
+	void PRR_disable_all();
+	void PRR_enable_ADC_Timer0();
+	void PRR_enable_ADC_Timers_TWI();
 };
 #endif

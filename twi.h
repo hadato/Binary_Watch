@@ -38,6 +38,8 @@ class twi
 		void write(uint8_t);				
 		uint8_t status();
 		void stop();
+		static void enable_pull_ups();
+		static void disable_pull_ups();
 		
 		/*Communication*/
 		void PCF_read(uint8_t *, uint8_t);
@@ -50,15 +52,16 @@ class twi
 		Time get_TimeDate_BCD();
 		Time get_TimeDate_DEC();
 		
+		/*Time format functions*/
+		static uint8_t BCD2DEC(uint8_t);
+		static uint8_t BCD2DEC(uint8_t, uint8_t);
+		static uint8_t DEC2BCD(uint8_t);
 		
 		
 	protected:
 	private:
 		uint8_t LastTimeDate_BCD[7];
-		uint8_t LastTimeDate_DEC[7];
-		uint8_t BCD2DEC(uint8_t);
-		uint8_t BCD2DEC(uint8_t, uint8_t);
-		uint8_t DEC2BCD(uint8_t);		
+		uint8_t LastTimeDate_DEC[7];		
 		uint8_t check_TimeDate_BCD(Time);
 };
 

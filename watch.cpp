@@ -24,12 +24,16 @@ namespace watch{
 	float battery_level = 0;		//A variable to store the battery level (initialized to 0)
 	State state = GO_SLEEP;			//A variable to indicate the current state of the watch. Set to enter the sleep mode
 	float u_supply = 0;				//A variable to store the current voltage of the battery
+	uint16_t u_supply_sum= 0;		//Raw sum of the battery voltage readouts
 	float u_supply_show = 0;		//A variable to store the voltage of the battery to be displayed on the LEDs
 	uint16_t blink_counter = 0;		//A counter for blinking function
 	bool blink = true;				//Should the LEDs blink?
 	uint8_t error = 0;				//An internal error variable
 	uint8_t light = 255;			//A variable to store how much light it is outside (values from 0 (high light) - 255 (low light))
+	uint8_t light_vect[] = {255,255,255,255};
+	uint16_t light_sum = 0;
 	adc_stat ADC_stat = MEASURE_LIGHT;		//A variable to store the ADC internal state
+	uint8_t adc_counter = 0;				//Counter for the light average
 	
 	//Instance of the Twi class - communication with the RT clock
 	twi Twi;	
@@ -42,6 +46,7 @@ ISR(BADISR_vect)
 	// skip a random interrupt
 }
 
+////////////////////LED multiplexing and visualization //////////////////////////////// 
 ISR(TIMER2_COMPA_vect){
 	//dim the LEDs according to the light
 	watch::clear_LED();
@@ -52,17 +57,13 @@ ISR(TIMER2_COMPB_vect){
 	watch::ISR_handler();		//Turn on the correct LEDs	
 }
 
-/********************Functions to handle the bottom interrupts***************************/
+//////////////////Functions to handle bottom interrupts/////////////////////////////
 ISR (INT0_vect)
 {
-	PORTB |= LED_ON;
 	EIMSK &= ~(1 << INT0);		//Turns off INT0
 	TIMSK1 |= (1 << OCIE1A)|(1 << OCIE1B);	//Enable Timer1 on compare match A and B
-	TCNT1  = 0;					//Reset timer1 counter
-	//watch::press_how_long = 0;
+	TCNT1  = 0;					//Reset timer1 counter	
 }
-
-
 
 ISR (TIMER1_COMPA_vect){
 	EIMSK  |= (1 << INT0);		//Turns on INT0
@@ -81,16 +82,16 @@ ISR (TIMER1_COMPB_vect){
 	}
 	//If not pressed, determine how long the press was
 	else{if (watch::press_how_long >= EX_LONG_PRESS){
-			PORTB |= LED_ON;
+			//PORTB |= LED_ON;
 			watch::pressed = EX_LONG;
 		}else if (watch::press_how_long >= LONG_PRESS){
-			PORTB |= LED_ON;
+			//PORTB |= LED_ON;
 			watch::pressed = LONG;
 		}else if (watch::press_how_long >= SHORT_PRESS){
-			PORTB |= LED_ON;
+			//PORTB |= LED_ON;
 			watch::pressed = SHORT;
 		}else if (watch::press_how_long < SHORT_PRESS){
-			PORTB &= LED_OFF;
+			//PORTB &= LED_OFF;
 			watch::pressed = NOT;
 		}
 		watch::press_how_long = 0;
@@ -99,21 +100,63 @@ ISR (TIMER1_COMPB_vect){
 	}
 }
 
+
+///////////////////////////////////////////////////////////////////////////////////////////////
+// ADC, voltage and light measurements
+// To measure the light, supply voltage is measured first, then, the light intensity is
+// scaled accordingly
+// First,
+//
+// After calling watch::ADC_get_supply_light(), timer0 is started to enable the voltage
+// on the internal reference to settle. After ca. 10 ms, the measurement of the battery
+// voltage is started. After done, an ADC interrupt is triggered. In order to get more
+// precise measurement, the voltage is measured 16 times and averaged before the actual
+// light measurement is performed. The battery voltage is stored in a variable 
+// watch::u_supply. The light intensity is measured 8 times and the average is returned 
+// and saved in watch:.light .
+
 ISR(ADC_vect){
-	//Interrupt handler for the ADC
-	//If measuring battery, save to the battery voltage value else save to the light value
-	sei();
+	// Interrupt handler for the ADC
+	// If measuring battery, save to the watch::u_supply and then measures the light intensity and 
+	// saves to watch::light. If done, disable the ADC
+	
+	sei();		//Enable the ISR to be interrupted by other interrupts
+	
+	//If measuring the battery
 	if (watch::ADC_stat == MEASURE_SUPPLY)	{
-		watch::u_supply = (1.1*1023/ADC);		// AVcc = Vbg/ADC*1023 = 1.1V*1023/ADC;
-		watch::ADC_get_light();
+		// Average 8 measurements together to eliminate the ripple
+		if (watch::adc_counter < 16){
+			watch::adc_counter++;
+			watch::u_supply_sum += ADC;		// add the ADC readout to the voltage sum
+			watch::ADC_start();
+		}else{		
+			watch::adc_counter = 0;					// zero the adc_coutner
+			
+			// AVcc = Vbg/ADC*1023 = 1.1V*1023/ADC - Use the average u_supply_sum instead fo the ADC
+			watch::u_supply = (1.1*1023/(watch::u_supply_sum >> 4));
+					
+			watch::u_supply_sum = 0;				// zero the average supply voltage sum
+			watch::ADC_get_light();					// start the light measurement
+		}
 		
-		}else{
+	//If measuring the light
+	}else if(watch::adc_counter < 8){
+		// Average 8 measurements to eliminate the ripple 
+		watch::adc_counter++;
+		watch::light_sum += ADC;
+		watch::ADC_start();	
+		
+	//If done, disable the ADC and clear the variables
+	}else{
+		watch::adc_counter = 0;
 		watch::ADC_disable();
-		watch::light  = ADC>>2;	// save the ADC value for the read on the opto-resistor
+		watch::light = watch::light_sum >> 5;
+		watch::light_sum = 0;
 	}
 }
 
 ISR (TIMER0_COMPA_vect){
+	// Timer0 interrupt used to wait before the battery voltage is measured
 	watch::ADC_timer0_stop();
 	sei();		//Enable the interrupt being interrupted by other interrupts
 	watch::ADC_start();
@@ -121,27 +164,30 @@ ISR (TIMER0_COMPA_vect){
 
 
 void watch::ADC_timer0_init(){
-	// set up timer with CTC mode and prescaler = 64
+	// set up timer with CTC mode and prescaler = 256
 	TCCR0A |= (1 << WGM01);		//Set CTC mode
-	TCCR0B |= (1 << CS01)|(1 << CS00);		//Set prescaler
+	TCCR0B |= (1 << CS02);		//Set prescaler to 256
 	
 	// initialize counter
 	TCNT0 = 0;
 	
-	// set the frequency to ca 100 Hz
-	OCR0A = 155;
+	// set the frequency to ca 200 Hz
+	OCR0A = 39; //set to 200 Hz (78 for 50 Hz)
 }
 
 void watch::ADC_timer0_start(){
+	//Start the timer0 with correct mode
 	TCNT0	= 0;				//Zero the timer counter
 	TIMSK0 |= (1 << OCIE0A);	//Set interrupt on compare A match
 }
 
 void watch::ADC_timer0_stop(){
+	// Stop the timer0
 	TIMSK0 &= ~(1 << OCIE0A);	//Disable interrupt on compare A match
 }
 
 void watch::ADC_init(){
+	// Initializes ADC with correct frequency
 	ADCSRA  = (1 << ADPS2) | (1 << ADIE);   //Set prescaler to 16 - 62500 Hz and enable interrupts from ADC
 	ADMUX  |= (1 <<REFS0);					//Set reference to AVCC
 	ADC_timer0_init();						//Initialize timer0 for the delayed measurements of power supply voltage
@@ -180,12 +226,12 @@ int watch::ADC_get_light(){
 	ADC_stat = MEASURE_LIGHT;		// set the ADC status: measure the opto-resistor
 	DDRC  &= ~(1 << PC3);			// set PC3 as input - for the opto-resistor measurement
 	PORTC |= (1 << PC2);			// set the supply pin PC2 high - turn the power to the opto-resistor
-	//_delay_us(10);
+	for (int i = 0; i < 10; i++);	// wait for a bit to get the voltage settle 
 	ADC_start();
 	return 0;
 }
 
-
+///////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
 void watch::ISR_handler(){
@@ -405,43 +451,23 @@ void watch::sentToArduino(uint8_t data){
 	Twi.stop();
 }
 
-uint8_t watch::BCD2DEC(uint8_t data, uint8_t cntr){
-	/*Function to calculate a decimal representation from a BCD format*/
-	
-	//if the years have to be calculated
-	if (cntr == 6){
-		return ((data & 0b11110000) >> 4)*10 + (data & 0b00001111);
-	}
-	return ((data & 0b01110000) >> 4)*10 + (data & 0b00001111);
-}
-
-uint8_t watch::BCD2DEC(uint8_t data){
-	/*Function to calculate a decimal representation from a BCD format*/
-	return ((data & 0b01110000) >> 4)*10 + (data & 0b00001111);
-}
-
-uint8_t watch::DEC2BCD(uint8_t data){
-	/*Function to calculate BCD value from a decimal format*/
-	return (((data/10) << 4) + (data%10));
-}
-
 void watch::increment_seconds(){
-	time_BCD_new.seconds = DEC2BCD((BCD2DEC(time_BCD_new.seconds)+1)%60);
+	time_BCD_new.seconds = twi::DEC2BCD((twi::BCD2DEC(time_BCD_new.seconds)+1)%60);
 }
 void watch::increment_minutes(){
-	time_BCD_new.minutes = DEC2BCD((BCD2DEC(time_BCD_new.minutes)+1)%60);
+	time_BCD_new.minutes = twi::DEC2BCD((twi::BCD2DEC(time_BCD_new.minutes)+1)%60);
 }
 void watch::increment_hours(){
-	time_BCD_new.hours = DEC2BCD((BCD2DEC(time_BCD_new.hours)+1)%24);
+	time_BCD_new.hours = twi::DEC2BCD((twi::BCD2DEC(time_BCD_new.hours)+1)%24);
 }
 void watch::increment_day(){
-	time_BCD_new.days = DEC2BCD((BCD2DEC(time_BCD_new.days))%31+1);
+	time_BCD_new.days = twi::DEC2BCD((twi::BCD2DEC(time_BCD_new.days))%31+1);
 }
 void watch::increment_month(){
-	time_BCD_new.months = DEC2BCD((BCD2DEC(time_BCD_new.months))%12+1);
+	time_BCD_new.months = twi::DEC2BCD((twi::BCD2DEC(time_BCD_new.months))%12+1);
 }
 void watch::increment_year(){
-	time_BCD_new.years = DEC2BCD((BCD2DEC(time_BCD_new.years)+1)%50);
+	time_BCD_new.years = twi::DEC2BCD((twi::BCD2DEC(time_BCD_new.years)+1)%50);
 }
 
 void watch::timer1_init(){
@@ -459,7 +485,6 @@ void watch::timer1_init(){
 	OCR1A = 31249;
 	
 	TIMSK1 |= (1<<OCIE1A)|(1<<OCIE1B);	//Enable interrupts on compare match
-	sei();								//Enable global interrupts
 }
 
 void watch::timer2_init(){
@@ -470,7 +495,7 @@ void watch::timer2_init(){
 	TIMSK2 |= (1 << OCIE2A);	//Set interrupt on compare A match
 	TIMSK2 |= (1 << OCIE2B);	//Set interrupt on compare B match
 	
-	OCR2A = 200;				//set the compare value for the interrupt to 100
+	OCR2A = 250;				//set the compare value for the interrupt to 250
 	OCR2B =	10;					//set the compare value for the interrupt to 10
 }
 
@@ -482,7 +507,8 @@ void watch::sleep_init(){
 void watch::button_init(){
 	//Button press
 	DDRD  &= ~(1 << PD2);   // set PD2 (PCINT0) to input
-	PORTD |= (1 << PD2);    // turn On the Pull-up
+	//PORTD |= (1 << PD2);    // turn On the Pull-up
+	PORTD &= ~(1 << PD2);	// Turn Off the Pull-up
 	EIMSK |= (1 << INT0);     // Turns on INT0 in a normal operation mode (active low)
 }
 
@@ -499,11 +525,17 @@ void watch::init(){
 	//Set the initial value for column - used for multiplexing
 	col = 0;
 
-	cli();					//disable all interrupts
+	//cli();					//disable all interrupts
 	
 	DDRB |= 0b00111100;		//set PB2-PB5 as outputs
 	DDRD |= 0b11111011;		//set PD0, PD1, PD3-PD7 as outputs
 	
+	//Turn of not used modules
+	PRR |= (1 << PRUSART0);		// Turn off the USART0
+	PRR |= (1 << PRSPI);		// Turn off SPI
+	
+	//cli()
+		
 	clear_LED();			//set the pins so the LEDs are cleared		
 	
 	//Button press
@@ -521,7 +553,7 @@ void watch::init(){
 	//Initialize the sleep mode
 	sleep_init();
 		
-	sei();						// enable global interrupts
+	//sei();						// enable global interrupts
 	
 	//Initialize the watch with time to start the RT clock to operate - Uses TWI - interrupts have to be enabled
 	init_TimeDate();
@@ -530,20 +562,27 @@ void watch::init(){
 void watch::set_LED_intensity(uint8_t intensity){
 	//A function to set an intensity of the LEDs
 	
-	//Get the values to reasonable levels (1-23)
-	uint8_t intensity_temp = (intensity/255.0)*200 + 1;	
-	if (intensity_temp > 199) intensity_temp = 199;	
+	//Get the values to reasonable levels (1-249)
+	uint8_t intensity_temp = (intensity/255.0)*249 + 1;	
+	if (intensity_temp > 249) intensity_temp = 249;	
 	//Write to the compare match B register on timer 2
 	OCR2B = intensity_temp;
 }
 
-uint8_t watch::multiplex(uint8_t col){
+inline uint8_t watch::multiplex(uint8_t col){
 	return (0b00000001 << col) & 0b11111011;
 }
 
 void watch::clear_LED(){
+	// Safely clear all LEDs
 	WRITE_PORT(PORTB, 0b00111100, 0b00111100);
 	WRITE_PORT(PORTD, 0b00000000, 0b11111011);
+}
+
+void watch::set_all_pins_low_LED(){	
+	// Set all output LED pins low - for energy savings
+	WRITE_PORT(PORTB,0b00000000,0b00111100);	// set all LED outputs on PORTB low
+	WRITE_PORT(PORTD,0b00000000,0b11111011);	// set all LED outputs on PORTD low
 }
 
 void watch::show(uint8_t col, Time time, State state){
@@ -596,7 +635,7 @@ void watch::show(uint8_t col, Time time, State state){
 					break;
 				case 7:
 					clear_LED();
-					WRITE_PORT(PORTB, ~0b00000100, 0b00111100);
+					WRITE_PORT(PORTB, ~0b00010000, 0b00111100);
 					WRITE_PORT(PORTD, MLTX, 0b11111011);
 					break;
 			}		
@@ -670,7 +709,7 @@ void watch::show(uint8_t col, Time time, State state){
 					break;
 				case 7:
 					clear_LED();
-					WRITE_PORT(PORTB, ~0b00010000, 0b00111100);
+					WRITE_PORT(PORTB, ~0b00000100, 0b00111100);
 					WRITE_PORT(PORTD, MLTX, 0b11111011);
 					break;
 				default:
@@ -724,7 +763,7 @@ void watch::show(uint8_t col, Time time, State state){
 				case 7:
 				blink = false;
 				clear_LED();
-				set_LED(~0b00000100, MLTX);
+				set_LED(~0b00010000, MLTX);
 				break;
 			}
 		break;
@@ -774,7 +813,7 @@ void watch::show(uint8_t col, Time time, State state){
 				case 7:
 				blink = false;
 				clear_LED();
-				set_LED(~0b00000100, MLTX);
+				set_LED(~0b00010000, MLTX);
 				break;
 			}
 		break;
@@ -824,7 +863,7 @@ void watch::show(uint8_t col, Time time, State state){
 			case 7:
 			blink = false;
 			clear_LED();
-			set_LED(~0b00000100, MLTX);
+			set_LED(~0b00010000, MLTX);
 			break;
 		}
 		break;
@@ -990,10 +1029,10 @@ void watch::show(uint8_t col, Time time, State state){
 	}
 }
 
-void watch::set_LED(uint8_t row, uint8_t column){
+inline void watch::set_LED(uint8_t row, uint8_t column){
 	//A function to write a row and column combination into the LEDs and possibly blink the LEDs if needed
 	if(blink){
-		if (blink_counter < BLINK_CNTR_MAX/2)		{
+		if (blink_counter < BLINK_CNTR_MAX/2){
 			WRITE_PORT(PORTB, row, 0b00111100);		//Write the correct values to port B, 0 means LED ON!
 			WRITE_PORT(PORTD, column, 0b11111011);
 		}
@@ -1002,3 +1041,16 @@ void watch::set_LED(uint8_t row, uint8_t column){
 		WRITE_PORT(PORTD, column, 0b11111011);
 	}	
 }
+
+void watch::PRR_disable_all(){
+	PRR |= 0b11101111;	//Turn off all peripherals
+}
+
+void watch::PRR_enable_ADC_Timer0(){
+	PRR |= 0b11001110;	//Turn on just the ADC and Timer0
+}
+
+void watch::PRR_enable_ADC_Timers_TWI(){
+	PRR = 0b00000110;	//Turn on all peripherals except SPI and USART0
+}
+

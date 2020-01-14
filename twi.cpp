@@ -9,19 +9,22 @@ This is a source file to twi.h to enable two wire communication (I2C) on an Atme
 /******************************* HARDWARE ACCESS******************************/
 twi::twi(){
 	/*
-	Initialization function - sets the uC to 62.5 kHz signal clock frequency
-	SLC_freq = CPU_clock/(16 + 2(TWBR) + Precsacler_val)
-	SLC_freq = 1MHz/16 = 62.5 kHz	
-	Disable the internal pull-ups
+	Initialization function - sets the uC to 5 kHz signal clock frequency
+	SLC_freq = CPU_clock/(16 + 2(TWBR)*Precsacler_val)
+	SLC_freq = 1MHz/(16 + 2*23*4) = 1MHz/200 = 5 kHz	
+	Enable the internal pull-ups
 	*/
-	TWBR = 0;								        // Set bitrate factor to 0
-	TWSR |= (1<<TWPS1) | (0<<TWPS0);		        // Set prescaler to 1
+	TWBR = 48;								        // Set bitrate factor to 42
+	TWSR |= (0<<TWPS1) | (1<<TWPS0);		        // Set prescaler to 1
 	
-	//Disable the internal pull-up resistors
+	//Enable the internal pull-up resistors
 	DDRC &= ~(1 << DDC5);				// SCL, Clear the PC5 pin, PC5 is now an input
-	PORTC |= ~(1 << PC5);				// SCL, turn Off the Pull-up PC5 is now an input with pull-up enabled
-	DDRC &= ~(1 << DDC4);				// SDA
-	PORTC |= ~(1 << PC4);				// SDA
+	PORTC |= (1 << PC5);				// SCL, enable pull-up
+	//PORTC &= ~(1 << PC5);				// SCL, turn Off the Pull-up. PC5 is now an input with pull-up disabled
+	
+	DDRC &= ~(1 << DDC4);				// SDA, Clear the PC4 pin, PC4 is now an input	
+	//PORTC &= ~(1 << PC4);				// SDA, turn Off the Pull-up. PC4 is now an input with pull-up disabled
+	PORTC |= (1 << PC4);				// SDA, enable pull-up
 	
 	// Get the last time from the Real-time clock	
 	PCF_read(&LastTimeDate_BCD[0], 7);				
@@ -59,6 +62,17 @@ void twi::stop(){
 	//while ((TWCR & (1<<TWSTO)));
 }
 
+void twi::enable_pull_ups(){
+	//Enable pull-ups on TWI
+	PORTC |= (1 << PC5);						// SCL, enable pull-up
+	PORTC |= (1 << PC4);						// SDA, enable pull-up
+}
+
+void twi::disable_pull_ups(){
+	//Disable pull-ups on TWI
+	PORTC &= ~(1 << PC5);						// SCL, disable pull-up
+	PORTC &= ~(1 << PC4);						// SDA, disable pull-up
+}
 
 
 
@@ -100,6 +114,7 @@ void twi::PCF_writeRegisters(uint8_t address, uint8_t *data, uint8_t count)
 {
 	/*A function to set up required register value*/
 }
+
 
 /********************************USER INTERFACE****************************/
 uint8_t twi::set_TimeDate(Time time){
