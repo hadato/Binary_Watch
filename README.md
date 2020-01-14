@@ -2,9 +2,7 @@
 
 This is a project of binary watch which is able to show time, date and its battery level. Three side LEDs show what is currently on display. The watch is based on an ATMega328p and a PCF8563 real-time clock. All control is done using one press bottom. Light-sensing is implemented for brightness adjustments. 
 
-![Final prototype](https://github.com/hadato/Binary_Watch/blob/master/FinalPototype.jpg)
-![Final look](https://github.com/hadato/Binary_Watch/blob/master/Top_final.PNG)
-
+![Final prototype](https://github.com/hadato/Binary_Watch/blob/master/_DSC3207.JPG)
 
 ## Description
 
@@ -49,3 +47,6 @@ The board is designe using EAGLE and its lates version (9.5.1). The file Top_fin
 ## Other Pictures
 ![TopCopper](https://github.com/hadato/Binary_Watch/blob/master/Top_copper.PNG)
 ![BotCopper](https://github.com/hadato/Binary_Watch/blob/master/Bot_copper.PNG)
+![Top](https://github.com/hadato/Binary_Watch/blob/master/_DSC3206.JPG)
+![Bot](https://github.com/hadato/Binary_Watch/blob/master/_DSC3205.JPG)
+
